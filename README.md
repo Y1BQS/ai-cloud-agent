@@ -9,17 +9,24 @@ Multi-agent system that monitors an AWS account and sends daily/weekly email rep
 
 ### One-time setup
 
-1. **Create the GitHub repo**
+1. **Create the CloudFormation service role (required for Git sync)**  
+   CloudFormation needs an IAM role to assume when creating/updating the stack. Deploy it once:
+   - In the **CloudFormation console**: Create stack → Upload a template file → choose `templates/cloudformation-service-role.yaml` from this repo (or paste its contents).
+   - Stack name: e.g. `ai-cloud-agent-bootstrap`.
+   - Create the stack. When it completes, go to **Outputs** and copy the **RoleArn** (e.g. `arn:aws:iam::123456789012:role/ai-cloud-agent-cloudformation-service-role`).
+   - When creating the main stack with **Sync from Git**, under **Permissions** → **IAM role**, choose this role (it appears as `ai-cloud-agent-cloudformation-service-role`).
+
+2. **Create the GitHub repo**
    - On GitHub: New repository → name `ai-cloud-agent` (or your choice) → Create (no need to add README; this project has one).
 
-2. **Connect and push**
+3. **Connect and push**
    ```bash
    git remote add origin https://github.com/YOUR_ORG/ai-cloud-agent.git
    git branch -M main
    git push -u origin main
    ```
 
-3. **Configure AWS credentials for the pipeline**
+4. **Configure AWS credentials for the pipeline**
    - **Option A (recommended): OIDC**  
      In your AWS account, create an OIDC identity provider for GitHub and an IAM role that trusts it and has `cloudformation:*` (and later `ecr:*`, `lambda:*`). In the repo: Settings → Secrets and variables → Actions:
      - **Variables**: `USE_OIDC` = `true`
@@ -30,7 +37,7 @@ Multi-agent system that monitors an AWS account and sends daily/weekly email rep
      - `AWS_SECRET_ACCESS_KEY`
      - `AWS_REGION` (e.g. `us-east-1`). If omitted, the workflow uses `us-east-1`.
 
-4. **Update the workflow for your stack name**  
+5. **Update the workflow for your stack name**  
    Edit `.github/workflows/deploy.yml` and set `stack-name` (and `region` if not using a secret) to match your environment (e.g. `ai-cloud-agent-sandbox`).
 
 After that, every push to `main` runs the workflow and deploys/updates the CloudFormation stack.

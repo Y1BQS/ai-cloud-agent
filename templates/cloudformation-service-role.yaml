@@ -1,0 +1,104 @@
+# Deploy this stack once (manually) before using "Sync from Git".
+# It creates an IAM role that CloudFormation assumes when creating/updating the main stack.
+# Then in the Git sync wizard, choose this role under "Permissions - IAM role".
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: IAM role for CloudFormation to use when deploying the AI Cloud Agent stack (Git sync or console).
+
+Resources:
+  CloudFormationServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ai-cloud-agent-cloudformation-service-role
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Role assumed by CloudFormation when creating/updating the ai-cloud-agent stack.
+
+  CloudFormationServiceRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: ai-cloud-agent-cloudformation-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # SSM (current stack: PipelineMarker parameter)
+          - Effect: Allow
+            Action:
+              - ssm:AddTagsToResource
+              - ssm:DeleteParameter
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:PutParameter
+              - ssm:RemoveTagsFromResource
+            Resource: "*"
+          # Lambda (when we add supervisor and agent functions)
+          - Effect: Allow
+            Action:
+              - lambda:CreateFunction
+              - lambda:DeleteFunction
+              - lambda:GetFunction
+              - lambda:GetFunctionConfiguration
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
+              - lambda:AddPermission
+              - lambda:RemovePermission
+            Resource: "*"
+          # IAM roles and policies for Lambda execution
+          - Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:GetRole
+              - iam:PassRole
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+            Resource: "*"
+          # EventBridge rules (daily/weekly schedules)
+          - Effect: Allow
+            Action:
+              - events:PutRule
+              - events:DeleteRule
+              - events:DescribeRule
+              - events:PutTargets
+              - events:RemoveTargets
+              - events:ListTargetsByRule
+            Resource: "*"
+          # ECR (Lambda container images)
+          - Effect: Allow
+            Action:
+              - ecr:CreateRepository
+              - ecr:DeleteRepository
+              - ecr:DescribeRepositories
+              - ecr:SetRepositoryPolicy
+              - ecr:GetRepositoryPolicy
+            Resource: "*"
+          # CloudWatch Logs (Lambda log groups)
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:DescribeLogGroups
+            Resource: "*"
+          # SES (optional; if we create config in template)
+          - Effect: Allow
+            Action:
+              - ses:GetIdentityVerificationAttributes
+            Resource: "*"
+      Roles:
+        - !Ref CloudFormationServiceRole
+
+Outputs:
+  RoleArn:
+    Description: Use this ARN when CloudFormation asks for "IAM role" (e.g. Git sync).
+    Value: !GetAtt CloudFormationServiceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-RoleArn"
