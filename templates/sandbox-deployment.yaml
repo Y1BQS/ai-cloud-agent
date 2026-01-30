@@ -1,7 +1,12 @@
 # CloudFormation Git Sync deployment file for sandbox
 # See: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/git-sync-concepts-terms.html#git-sync-concepts-terms-depoyment-file
+# Replace SenderEmail and RecipientEmails with your verified SES sender and report recipients before pushing.
 
 template-file-path: templates/main.yaml
 parameters:
   Environment: sandbox
+  SenderEmail: "REPLACE_WITH_YOUR_VERIFIED_SES_EMAIL@yourdomain.com"
+  RecipientEmails: "REPLACE_WITH_RECIPIENT_EMAIL@company.com"
+  AccountAlias: sandbox
+  BedrockModelId: "anthropic.claude-3-5-sonnet-v2:0"
 tags: {}
