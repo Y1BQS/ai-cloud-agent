@@ -70,25 +70,42 @@ When you create or update the stack (Sync from Git or console), set:
 
 Lambda rejects `public.ecr.aws/lambda/python:3.12` because it only accepts images from **private** ECR in the same account/region. Do this:
 
-1. **Get your ECR repo URIs**  
+1. **Create the ECR repos** (if you see *"The repository with name 'ai-cloud-agent-sandbox-...' does not exist"* when pushing):  
+   Deploy the ECR-only template once so the repos exist:
+   - **CloudFormation console** → Create stack → Upload a template file → choose `templates/ecr-only.yaml`.
+   - Stack name: e.g. `ai-cloud-agent-ecr`.
+   - Create the stack. When it completes, the three repos exist and you can push images.
+
+2. **Get your ECR repo URIs**  
    From the CloudFormation stack **Outputs** (or Resources): `SupervisorRepoUri`, `CostAgentRepoUri`, `SecurityAgentRepoUri`. If the stack is CREATE_FAILED, the ECR repos may still exist – check the ECR console for `ai-cloud-agent-sandbox-supervisor`, `-cost-agent`, `-security-agent`. The image URI format is: `ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest` (replace ACCOUNT and REGION).
 
-2. **Push the base image to each repo** (replace `ACCOUNT` and `REGION` with your AWS account ID and region, e.g. `us-east-1`):
-   ```bash
+3. **Push the base image to each repo** – run these commands **one at a time** in PowerShell or a terminal (no script needed). Replace `ACCOUNT` and `REGION` with your AWS account ID and region (e.g. `503532613196`, `us-east-1`):
+
+   ```powershell
    aws ecr get-login-password --region REGION | docker login --username AWS --password-stdin ACCOUNT.dkr.ecr.REGION.amazonaws.com
+   ```
+   ```powershell
    docker pull public.ecr.aws/lambda/python:3.12
+   ```
+   ```powershell
    docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest
    docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest
+   ```
+   ```powershell
    docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest
    docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest
+   ```
+   ```powershell
    docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-security-agent:latest
    docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-security-agent:latest
    ```
 
-3. **Set the image parameters**  
+   Example for account `503532613196` and region `us-east-1`: use `503532613196` for ACCOUNT and `us-east-1` for REGION in every command above.
+
+4. **Set the image parameters**  
    In `templates/sandbox-deployment.yaml`, replace `ACCOUNT` and `REGION` in **SupervisorImageUri**, **CostAgentImageUri**, and **SecurityAgentImageUri** with your real account ID and region (e.g. `123456789012`, `us-east-1`).
 
-4. **Commit and push**  
+5. **Commit and push**  
    Git sync will run again; the stack update will use the new image URIs and Lambda creation should succeed. If the stack was CREATE_FAILED, the update retries the failed resources.
 
 ### First deploy (with base images)

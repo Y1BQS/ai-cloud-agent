@@ -35,28 +35,7 @@ Parameters:
     Description: Bedrock model ID for Converse API (e.g. anthropic.claude-3-5-sonnet-v2:0).
 
 Resources:
-  # --- ECR repositories (push your container images here) ---
-  SupervisorRepo:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub "ai-cloud-agent-${Environment}-supervisor"
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {"rules":[{"rulePriority":1,"description":"Keep last 5 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}
-  CostAgentRepo:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub "ai-cloud-agent-${Environment}-cost-agent"
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {"rules":[{"rulePriority":1,"description":"Keep last 5 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}
-  SecurityAgentRepo:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub "ai-cloud-agent-${Environment}-security-agent"
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {"rules":[{"rulePriority":1,"description":"Keep last 5 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}
+  # ECR repos are created by templates/ecr-only.yaml. Deploy that stack first, push images, then deploy this stack.
 
   # --- SSM config (supervisor reads these at runtime) ---
   ConfigRecipients:
@@ -286,14 +265,14 @@ Outputs:
     Description: Security agent Lambda ARN.
     Value: !GetAtt SecurityAgentLambda.Arn
   SupervisorRepoUri:
-    Description: ECR image URI for supervisor. Push your image here, then update stack parameter SupervisorImageUri.
-    Value: !Sub "${SupervisorRepo}:latest"
+    Description: ECR image URI for supervisor (repos created by ecr-only stack).
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ai-cloud-agent-${Environment}-supervisor:latest"
   CostAgentRepoUri:
     Description: ECR image URI for cost agent.
-    Value: !Sub "${CostAgentRepo}:latest"
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ai-cloud-agent-${Environment}-cost-agent:latest"
   SecurityAgentRepoUri:
     Description: ECR image URI for security agent.
-    Value: !Sub "${SecurityAgentRepo}:latest"
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ai-cloud-agent-${Environment}-security-agent:latest"
   LastDeployedParameter:
     Description: SSM parameter updated on each deploy.
     Value: !Ref PipelineMarker
