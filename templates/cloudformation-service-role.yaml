@@ -50,7 +50,7 @@ Resources:
               - lambda:AddPermission
               - lambda:RemovePermission
             Resource: "*"
-          # IAM roles and policies for Lambda execution
+          # IAM roles and policies for Lambda execution (incl. managed policies for stack delete)
           - Effect: Allow
             Action:
               - iam:CreateRole
@@ -59,8 +59,16 @@ Resources:
               - iam:PassRole
               - iam:PutRolePolicy
               - iam:DeleteRolePolicy
+              - iam:GetRolePolicy
               - iam:AttachRolePolicy
               - iam:DetachRolePolicy
+              - iam:GetPolicy
+              - iam:DeletePolicy
+              - iam:ListEntitiesForPolicy
+              - iam:ListPolicyVersions
+              - iam:DeletePolicyVersion
+              - iam:ListAttachedRolePolicies
+              - iam:ListRolePolicies
             Resource: "*"
           # EventBridge rules (daily/weekly schedules)
           - Effect: Allow
@@ -80,6 +88,8 @@ Resources:
               - ecr:DescribeRepositories
               - ecr:SetRepositoryPolicy
               - ecr:GetRepositoryPolicy
+              - ecr:ListImages
+              - ecr:BatchDeleteImage
             Resource: "*"
           # CloudWatch Logs (Lambda log groups)
           - Effect: Allow
@@ -87,6 +97,8 @@ Resources:
               - logs:CreateLogGroup
               - logs:DeleteLogGroup
               - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+              - logs:DeleteLogStream
             Resource: "*"
           # SES (optional; if we create config in template)
           - Effect: Allow

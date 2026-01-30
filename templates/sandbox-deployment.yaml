@@ -1,0 +1,7 @@
+# CloudFormation Git Sync deployment file for sandbox
+# See: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/git-sync-concepts-terms.html#git-sync-concepts-terms-depoyment-file
+
+template-file-path: templates/main.yaml
+parameters:
+  Environment: sandbox
+tags: {}
