@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AI Cloud Agent - sandbox stack (pipeline placeholder; Lambdas/EventBridge added later).
+
+Parameters:
+  Environment:
+    Type: String
+    Default: sandbox
+    AllowedValues:
+      - sandbox
+      - dev
+      - prod
+    Description: Environment name for resource naming.
+
+Resources:
+  PipelineMarker:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/ai-cloud-agent/${Environment}/last-deployed"
+      Type: String
+      Value: !Sub "Deployed at ${AWS::StackName} - placeholder"
+      Description: Updated on each deploy so the pipeline has a valid stack to apply.
+
+Outputs:
+  LastDeployedParameter:
+    Description: SSM parameter updated on each deploy (pipeline validation).
+    Value: !Ref PipelineMarker
+    Export:
+      Name: !Sub "${AWS::StackName}-LastDeployedParameter"
