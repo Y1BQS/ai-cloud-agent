@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: AI Cloud Agent - sandbox stack (pipeline placeholder; Lambdas/EventBridge added later).
+Description: AI Cloud Agent - supervisor + cost and security subordinate agents; EventBridge daily/weekly; SES email; Bedrock.
 
 Parameters:
   Environment:
@@ -10,19 +10,295 @@ Parameters:
       - dev
       - prod
     Description: Environment name for resource naming.
+  SupervisorImageUri:
+    Type: String
+    Default: public.ecr.aws/lambda/python:3.12
+    Description: ECR image URI for the supervisor Lambda. Replace with your image after building.
+  CostAgentImageUri:
+    Type: String
+    Default: public.ecr.aws/lambda/python:3.12
+    Description: ECR image URI for the cost agent Lambda. Replace with your image after building.
+  SecurityAgentImageUri:
+    Type: String
+    Default: public.ecr.aws/lambda/python:3.12
+    Description: ECR image URI for the security agent Lambda. Replace with your image after building.
+  SenderEmail:
+    Type: String
+    Description: Verified SES sender email (e.g. noreply@yourdomain.com).
+  RecipientEmails:
+    Type: String
+    Description: Comma-separated recipient emails for reports.
+  AccountAlias:
+    Type: String
+    Default: sandbox
+    Description: Account alias shown in email subject (e.g. sandbox, prod).
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-5-sonnet-v2:0
+    Description: Bedrock model ID for Converse API (e.g. anthropic.claude-3-5-sonnet-v2:0).
 
 Resources:
+  # --- ECR repositories (push your container images here) ---
+  SupervisorRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "ai-cloud-agent-${Environment}-supervisor"
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 5 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}
+  CostAgentRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "ai-cloud-agent-${Environment}-cost-agent"
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 5 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}
+  SecurityAgentRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "ai-cloud-agent-${Environment}-security-agent"
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 5 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}
+
+  # --- SSM config (supervisor reads these at runtime) ---
+  ConfigRecipients:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/ai-cloud-agent/${Environment}/recipients"
+      Type: String
+      Value: !Ref RecipientEmails
+      Description: Comma-separated recipient emails for reports.
+  ConfigAccountAlias:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/ai-cloud-agent/${Environment}/account-alias"
+      Type: String
+      Value: !Ref AccountAlias
+      Description: Account alias for email subject.
   PipelineMarker:
     Type: AWS::SSM::Parameter
     Properties:
       Name: !Sub "/ai-cloud-agent/${Environment}/last-deployed"
       Type: String
-      Value: !Sub "Deployed at ${AWS::StackName} - placeholder"
-      Description: Updated on each deploy so the pipeline has a valid stack to apply.
+      Value: !Sub "Deployed at ${AWS::StackName}"
+      Description: Updated on each deploy.
+
+  # --- IAM: Cost agent (Cost Explorer + Bedrock) ---
+  CostAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ai-cloud-agent-${Environment}-cost-agent-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+  CostAgentPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "ai-cloud-agent-${Environment}-cost-agent-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+            Resource: "*"
+          - Effect: Allow
+            Action: [ce:GetCostAndUsage]
+            Resource: "*"
+          - Effect: Allow
+            Action: [bedrock:InvokeModel]
+            Resource: "*"
+      Roles: [!Ref CostAgentRole]
+
+  # --- IAM: Security agent (Security Hub / EC2 / S3 + Bedrock) ---
+  SecurityAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ai-cloud-agent-${Environment}-security-agent-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+  SecurityAgentPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "ai-cloud-agent-${Environment}-security-agent-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+            Resource: "*"
+          - Effect: Allow
+            Action: [securityhub:GetFindings]
+            Resource: "*"
+          - Effect: Allow
+            Action: [ec2:DescribeInstances]
+            Resource: "*"
+          - Effect: Allow
+            Action: [s3:GetBucketPublicAccessBlock, s3:ListAllMyBuckets]
+            Resource: "*"
+          - Effect: Allow
+            Action: [bedrock:InvokeModel]
+            Resource: "*"
+      Roles: [!Ref SecurityAgentRole]
+
+  # --- IAM: Supervisor (invoke Lambdas, Bedrock, SES, SSM) ---
+  SupervisorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ai-cloud-agent-${Environment}-supervisor-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+  SupervisorPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "ai-cloud-agent-${Environment}-supervisor-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+            Resource: "*"
+          - Effect: Allow
+            Action: [lambda:InvokeFunction]
+            Resource: [!GetAtt CostAgentLambda.Arn, !GetAtt SecurityAgentLambda.Arn]
+          - Effect: Allow
+            Action: [bedrock:InvokeModel]
+            Resource: "*"
+          - Effect: Allow
+            Action: [ses:SendEmail]
+            Resource: "*"
+          - Effect: Allow
+            Action: [ssm:GetParameter, ssm:GetParameters]
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ai-cloud-agent/${Environment}/*"
+      Roles: [!Ref SupervisorRole]
+
+  # --- Lambda: Cost agent ---
+  CostAgentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "ai-cloud-agent-${Environment}-cost-agent"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref CostAgentImageUri
+      Role: !GetAtt CostAgentRole.Arn
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          ENVIRONMENT: !Ref Environment
+
+  # --- Lambda: Security agent ---
+  SecurityAgentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "ai-cloud-agent-${Environment}-security-agent"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref SecurityAgentImageUri
+      Role: !GetAtt SecurityAgentRole.Arn
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          ENVIRONMENT: !Ref Environment
+
+  # --- Lambda: Supervisor (must be after subordinate Lambdas for policy ARNs) ---
+  SupervisorLambda:
+    Type: AWS::Lambda::Function
+    DependsOn: [CostAgentPolicy, SecurityAgentPolicy]
+    Properties:
+      FunctionName: !Sub "ai-cloud-agent-${Environment}-supervisor"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref SupervisorImageUri
+      Role: !GetAtt SupervisorRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          COST_AGENT_ARN: !GetAtt CostAgentLambda.Arn
+          SECURITY_AGENT_ARN: !GetAtt SecurityAgentLambda.Arn
+          SENDER_EMAIL: !Ref SenderEmail
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          ENVIRONMENT: !Ref Environment
+          SSM_PREFIX: !Sub "/ai-cloud-agent/${Environment}"
+
+  # --- EventBridge: daily (e.g. 08:00 UTC) ---
+  DailyScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "ai-cloud-agent-${Environment}-daily"
+      Description: Trigger supervisor for daily report
+      ScheduleExpression: "cron(0 8 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Id: SupervisorDaily
+          Arn: !GetAtt SupervisorLambda.Arn
+          Input: !Sub '{"schedule_type":"daily"}'
+  PermissionEventBridgeDaily:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SupervisorLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DailyScheduleRule.Arn
+
+  # --- EventBridge: weekly (e.g. Monday 08:00 UTC) ---
+  WeeklyScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "ai-cloud-agent-${Environment}-weekly"
+      Description: Trigger supervisor for weekly report
+      ScheduleExpression: "cron(0 8 ? * MON *)"
+      State: ENABLED
+      Targets:
+        - Id: SupervisorWeekly
+          Arn: !GetAtt SupervisorLambda.Arn
+          Input: !Sub '{"schedule_type":"weekly"}'
+  PermissionEventBridgeWeekly:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SupervisorLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WeeklyScheduleRule.Arn
 
 Outputs:
+  SupervisorFunctionArn:
+    Description: Supervisor Lambda ARN (for testing).
+    Value: !GetAtt SupervisorLambda.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SupervisorArn"
+  CostAgentFunctionArn:
+    Description: Cost agent Lambda ARN.
+    Value: !GetAtt CostAgentLambda.Arn
+  SecurityAgentFunctionArn:
+    Description: Security agent Lambda ARN.
+    Value: !GetAtt SecurityAgentLambda.Arn
+  SupervisorRepoUri:
+    Description: ECR image URI for supervisor. Push your image here, then update stack parameter SupervisorImageUri.
+    Value: !Sub "${SupervisorRepo}:latest"
+  CostAgentRepoUri:
+    Description: ECR image URI for cost agent.
+    Value: !Sub "${CostAgentRepo}:latest"
+  SecurityAgentRepoUri:
+    Description: ECR image URI for security agent.
+    Value: !Sub "${SecurityAgentRepo}:latest"
   LastDeployedParameter:
-    Description: SSM parameter updated on each deploy (pipeline validation).
+    Description: SSM parameter updated on each deploy.
     Value: !Ref PipelineMarker
     Export:
       Name: !Sub "${AWS::StackName}-LastDeployedParameter"

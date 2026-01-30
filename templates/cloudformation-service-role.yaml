@@ -54,6 +54,7 @@ Resources:
           - Effect: Allow
             Action:
               - iam:CreateRole
+              - iam:CreatePolicy
               - iam:DeleteRole
               - iam:GetRole
               - iam:PassRole

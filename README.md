@@ -42,11 +42,62 @@ Multi-agent system that monitors an AWS account and sends daily/weekly email rep
 
 After that, every push to `main` runs the workflow and deploys/updates the CloudFormation stack.
 
-## Project layout (planned)
+## Deploying the agent
 
-- `templates/` – CloudFormation templates (main stack; Lambdas will reference ECR images).
-- `src/` – Lambda source (supervisor, cost agent, security agent); built as Docker images and pushed to ECR by the pipeline.
-- `.github/workflows/` – GitHub Actions (deploy CloudFormation, and later build/push images to ECR).
+The main stack (`templates/main.yaml`) creates:
+
+- **Supervisor Lambda** – invokes subordinate Lambdas, calls Bedrock to synthesize the report, sends email via SES.
+- **Cost agent Lambda** – Cost Explorer + Bedrock; returns a short cost/optimization report.
+- **Security agent Lambda** – Security Hub / EC2 / S3 checks + Bedrock; returns a short security report.
+- **EventBridge** – daily (08:00 UTC) and weekly (Monday 08:00 UTC) rules that trigger the supervisor with `schedule_type: daily` or `weekly`.
+- **ECR repositories** – one per Lambda; push your container images here.
+- **SSM parameters** – recipients and account alias (used by the supervisor at runtime).
+
+### Required stack parameters
+
+When you create or update the stack (Sync from Git or console), set:
+
+| Parameter | Description |
+|-----------|-------------|
+| **SenderEmail** | Verified SES sender (e.g. `noreply@yourdomain.com`). Verify this identity in SES before deploying. |
+| **RecipientEmails** | Comma-separated emails that receive the reports (e.g. `engineer@company.com,team@company.com`). |
+| **AccountAlias** | Label in the email subject (e.g. `sandbox`, `prod`). Default: `sandbox`. |
+| **BedrockModelId** | Model for Converse API (default: `anthropic.claude-3-5-sonnet-v2:0`). Enable this model in Bedrock in your account/region. |
+
+Optional: **SupervisorImageUri**, **CostAgentImageUri**, **SecurityAgentImageUri**. Defaults are the public Lambda Python 3.12 image so the stack deploys without custom images. Replace with your ECR image URIs after you build and push.
+
+### First deploy (placeholder images)
+
+1. Verify the **sender email** in Amazon SES (SES console → Verified identities).
+2. Create the stack (Sync from Git or upload `templates/main.yaml`) with the required parameters above. Use the CloudFormation service role from the bootstrap stack.
+3. The stack creates all resources; Lambdas use the default Python 3.12 image until you supply your own.
+
+### Building and pushing your images
+
+After you add Lambda code under `src/supervisor/`, `src/agents/cost/`, and `src/agents/security/` (each with a `Dockerfile`):
+
+1. **Log in to ECR** (replace region and account as needed):
+   ```bash
+   aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
+   ```
+2. **Build and push** each image to the ECR URIs shown in the stack **Outputs** (e.g. `SupervisorRepoUri`, `CostAgentRepoUri`, `SecurityAgentRepoUri`). Tag as `latest` (or the tag you use in the Outputs).
+3. **Update the stack** with the new image URIs: set parameters **SupervisorImageUri**, **CostAgentImageUri**, **SecurityAgentImageUri** to the full ECR image URIs (e.g. `123456789012.dkr.ecr.us-east-1.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest`). If you use Git sync, update the stack deployment file parameters and commit; otherwise update the stack in the console.
+
+### Testing the supervisor
+
+Invoke the supervisor Lambda from the console or CLI with a test event to trigger a report without waiting for EventBridge:
+
+```json
+{"schedule_type": "daily"}
+```
+
+Check CloudWatch Logs for the supervisor and agents, and ensure the recipient inbox receives the email (and that SES is out of sandbox if sending to unverified addresses).
+
+## Project layout
+
+- **`templates/`** – CloudFormation: `main.yaml` (agent stack), `cloudformation-service-role.yaml` (bootstrap IAM role for Git sync).
+- **`src/`** – Lambda source: `supervisor/`, `agents/cost/`, `agents/security/` (each with a Dockerfile; add these when implementing the agents).
+- **`.github/workflows/`** – GitHub Actions (optional deploy; use Git sync for deployment if you prefer).
 
 ## License
 
