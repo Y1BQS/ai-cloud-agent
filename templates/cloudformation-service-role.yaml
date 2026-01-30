@@ -91,6 +91,7 @@ Resources:
               - ecr:GetRepositoryPolicy
               - ecr:ListImages
               - ecr:BatchDeleteImage
+              - ecr:PutLifecyclePolicy
             Resource: "*"
           # CloudWatch Logs (Lambda log groups)
           - Effect: Allow

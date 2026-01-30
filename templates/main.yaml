@@ -12,16 +12,13 @@ Parameters:
     Description: Environment name for resource naming.
   SupervisorImageUri:
     Type: String
-    Default: public.ecr.aws/lambda/python:3.12
-    Description: ECR image URI for the supervisor Lambda. Replace with your image after building.
+    Description: Private ECR image URI for the supervisor Lambda (same account/region). Lambda cannot use public ECR; push the base image to your stack ECR repo first.
   CostAgentImageUri:
     Type: String
-    Default: public.ecr.aws/lambda/python:3.12
-    Description: ECR image URI for the cost agent Lambda. Replace with your image after building.
+    Description: Private ECR image URI for the cost agent Lambda (same account/region).
   SecurityAgentImageUri:
     Type: String
-    Default: public.ecr.aws/lambda/python:3.12
-    Description: ECR image URI for the security agent Lambda. Replace with your image after building.
+    Description: Private ECR image URI for the security agent Lambda (same account/region).
   SenderEmail:
     Type: String
     Description: Verified SES sender email (e.g. noreply@yourdomain.com).

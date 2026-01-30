@@ -1,12 +1,18 @@
 # CloudFormation Git Sync deployment file for sandbox
 # See: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/git-sync-concepts-terms.html#git-sync-concepts-terms-depoyment-file
-# Replace SenderEmail and RecipientEmails with your verified SES sender and report recipients before pushing.
+#
+# Lambda requires images in PRIVATE ECR (same account/region). Before pushing:
+# 1. Push base image to each ECR repo (see README "Fix: Invalid source image").
+# 2. Replace ACCOUNT and REGION below with your AWS account ID and region (e.g. 123456789012, us-east-1).
 
 template-file-path: templates/main.yaml
 parameters:
   Environment: sandbox
-  SenderEmail: "REPLACE_WITH_YOUR_VERIFIED_SES_EMAIL@yourdomain.com"
-  RecipientEmails: "REPLACE_WITH_RECIPIENT_EMAIL@company.com"
+  SenderEmail: "khanhamza2293@gmail.com"
+  RecipientEmails: "hamza.khan@nscorp.com"
   AccountAlias: sandbox
   BedrockModelId: "anthropic.claude-3-5-sonnet-v2:0"
+  SupervisorImageUri: "503532613196.dkr.ecr.us-east-1.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest"
+  CostAgentImageUri: "503532613196.dkr.ecr.us-east-1.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest"
+  SecurityAgentImageUri: "503532613196.dkr.ecr.us-east-1.amazonaws.com/ai-cloud-agent-sandbox-security-agent:latest"
 tags: {}

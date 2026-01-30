@@ -64,13 +64,38 @@ When you create or update the stack (Sync from Git or console), set:
 | **AccountAlias** | Label in the email subject (e.g. `sandbox`, `prod`). Default: `sandbox`. |
 | **BedrockModelId** | Model for Converse API (default: `anthropic.claude-3-5-sonnet-v2:0`). Enable this model in Bedrock in your account/region. |
 
-Optional: **SupervisorImageUri**, **CostAgentImageUri**, **SecurityAgentImageUri**. Defaults are the public Lambda Python 3.12 image so the stack deploys without custom images. Replace with your ECR image URIs after you build and push.
+**SupervisorImageUri**, **CostAgentImageUri**, **SecurityAgentImageUri** – Required. Lambda **cannot** use images from public ECR; images must be in a **private ECR repository** in your account and region. Push the base image (or your custom image) to the stack’s ECR repos, then set these parameters to those image URIs (see below).
 
-### First deploy (placeholder images)
+### Fix: "Source image ... is not valid" / CREATE_FAILED
+
+Lambda rejects `public.ecr.aws/lambda/python:3.12` because it only accepts images from **private** ECR in the same account/region. Do this:
+
+1. **Get your ECR repo URIs**  
+   From the CloudFormation stack **Outputs** (or Resources): `SupervisorRepoUri`, `CostAgentRepoUri`, `SecurityAgentRepoUri`. If the stack is CREATE_FAILED, the ECR repos may still exist – check the ECR console for `ai-cloud-agent-sandbox-supervisor`, `-cost-agent`, `-security-agent`. The image URI format is: `ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest` (replace ACCOUNT and REGION).
+
+2. **Push the base image to each repo** (replace `ACCOUNT` and `REGION` with your AWS account ID and region, e.g. `us-east-1`):
+   ```bash
+   aws ecr get-login-password --region REGION | docker login --username AWS --password-stdin ACCOUNT.dkr.ecr.REGION.amazonaws.com
+   docker pull public.ecr.aws/lambda/python:3.12
+   docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest
+   docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest
+   docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest
+   docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest
+   docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-security-agent:latest
+   docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-security-agent:latest
+   ```
+
+3. **Set the image parameters**  
+   In `templates/sandbox-deployment.yaml`, replace `ACCOUNT` and `REGION` in **SupervisorImageUri**, **CostAgentImageUri**, and **SecurityAgentImageUri** with your real account ID and region (e.g. `123456789012`, `us-east-1`).
+
+4. **Commit and push**  
+   Git sync will run again; the stack update will use the new image URIs and Lambda creation should succeed. If the stack was CREATE_FAILED, the update retries the failed resources.
+
+### First deploy (with base images)
 
 1. Verify the **sender email** in Amazon SES (SES console → Verified identities).
-2. Create the stack (Sync from Git or upload `templates/main.yaml`) with the required parameters above. Use the CloudFormation service role from the bootstrap stack.
-3. The stack creates all resources; Lambdas use the default Python 3.12 image until you supply your own.
+2. Push the base image to your ECR repos (step 2 above). If the stack doesn’t exist yet, create the ECR repos first by deploying the stack once (it will fail on Lambda; ECR repos will exist), then push images and set the three image URIs in the deployment file, then push again.
+3. Ensure **SupervisorImageUri**, **CostAgentImageUri**, and **SecurityAgentImageUri** in the deployment file use your private ECR URIs (step 3 above), then create the stack (Sync from Git or console).
 
 ### Building and pushing your images
 
