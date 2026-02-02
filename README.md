@@ -79,18 +79,23 @@ Lambda rejects `public.ecr.aws/lambda/python:3.12` because it only accepts image
 2. **Get your ECR repo URIs**  
    From the CloudFormation stack **Outputs** (or Resources): `SupervisorRepoUri`, `CostAgentRepoUri`, `SecurityAgentRepoUri`. If the stack is CREATE_FAILED, the ECR repos may still exist – check the ECR console for `ai-cloud-agent-sandbox-supervisor`, `-cost-agent`, `-security-agent`. The image URI format is: `ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest` (replace ACCOUNT and REGION).
 
-3. **Push the base image to each repo** – run these commands **one at a time** in PowerShell or a terminal (no script needed). Replace `ACCOUNT` and `REGION` with your AWS account ID and region (e.g. `503532613196`, `us-east-1`):
+3. **Build and push the supervisor image** – the supervisor needs a proper image with a handler (not just the raw base image). From repo root:
+
+   ```powershell
+   .\scripts\build-supervisor.ps1 -AccountId ACCOUNT -Region REGION
+   ```
+
+   Or manually (replace ACCOUNT and REGION):
 
    ```powershell
    aws ecr get-login-password --region REGION | docker login --username AWS --password-stdin ACCOUNT.dkr.ecr.REGION.amazonaws.com
-   ```
-   ```powershell
-   docker pull public.ecr.aws/lambda/python:3.12
-   ```
-   ```powershell
-   docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest
+   docker build --platform linux/amd64 -t ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest -f src/supervisor/Dockerfile src/supervisor
    docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest
    ```
+
+   **Important:** Do not push the plain base image (`docker tag public.ecr.aws/lambda/python:3.12 ...`) for the supervisor. That causes "entrypoint requires the handler name to be the first argument" because the base image has no handler. Always build from `src/supervisor/Dockerfile`.
+
+   For the cost and security agents (if you only have base images for now):
    ```powershell
    docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest
    docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest
