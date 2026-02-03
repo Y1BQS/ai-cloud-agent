@@ -1,9 +1,9 @@
 # CloudFormation Git Sync deployment file for sandbox
 # See: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/git-sync-concepts-terms.html#git-sync-concepts-terms-depoyment-file
 #
-# Lambda requires images in PRIVATE ECR (same account/region). Before pushing:
-# 1. Push base image to each ECR repo (see README "Fix: Invalid source image").
-# 2. Replace ACCOUNT and REGION below with your AWS account ID and region (e.g. 123456789012, us-east-1).
+# Before first deploy:
+# 1. Deploy templates/s3-deployment-bucket.yaml to create the bucket.
+# 2. Run scripts/build-and-upload.ps1 to zip Lambdas and upload with --sse AES256.
 
 template-file-path: templates/main.yaml
 parameters:
@@ -12,7 +12,8 @@ parameters:
   RecipientEmails: "hamza.khan@nscorp.com"
   AccountAlias: sandbox
   BedrockModelId: "anthropic.claude-3-5-sonnet-v2:0"
-  SupervisorImageUri: "503532613196.dkr.ecr.us-east-1.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest"
-  CostAgentImageUri: "503532613196.dkr.ecr.us-east-1.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest"
-  SecurityAgentImageUri: "503532613196.dkr.ecr.us-east-1.amazonaws.com/ai-cloud-agent-sandbox-security-agent:latest"
+  DeploymentBucketName: "ai-cloud-agent-sandbox-deployments-503532613196"
+  SupervisorS3Key: "ai-cloud-agent/sandbox/supervisor.zip"
+  CostAgentS3Key: "ai-cloud-agent/sandbox/cost-agent.zip"
+  SecurityAgentS3Key: "ai-cloud-agent/sandbox/security-agent.zip"
 tags: {}

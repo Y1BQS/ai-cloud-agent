@@ -81,17 +81,11 @@ Resources:
               - events:RemoveTargets
               - events:ListTargetsByRule
             Resource: "*"
-          # ECR (Lambda container images)
+          # S3 (Lambda deployment packages - read zip from bucket)
           - Effect: Allow
             Action:
-              - ecr:CreateRepository
-              - ecr:DeleteRepository
-              - ecr:DescribeRepositories
-              - ecr:SetRepositoryPolicy
-              - ecr:GetRepositoryPolicy
-              - ecr:ListImages
-              - ecr:BatchDeleteImage
-              - ecr:PutLifecyclePolicy
+              - s3:GetObject
+              - s3:GetBucketLocation
             Resource: "*"
           # CloudWatch Logs (Lambda log groups)
           - Effect: Allow

@@ -8,6 +8,8 @@ on:
 env:
   AWS_REGION: us-east-1
   STACK_NAME: ai-cloud-agent-sandbox
+  BUCKET_NAME: ai-cloud-agent-sandbox-deployments-503532613196
+  S3_PREFIX: ai-cloud-agent/sandbox
 
 jobs:
   deploy:
@@ -35,11 +37,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION || env.AWS_REGION }}
 
+      - name: Build and upload Lambda packages
+        run: |
+          mkdir -p build
+          cd src/supervisor && zip -r ../../build/supervisor.zip *.py && cd ../..
+          cd src/agents/cost && zip -r ../../../build/cost-agent.zip *.py && cd ../../..
+          cd src/agents/security && zip -r ../../../build/security-agent.zip *.py && cd ../../..
+          aws s3 cp build/supervisor.zip s3://${{ env.BUCKET_NAME }}/${{ env.S3_PREFIX }}/supervisor.zip --sse AES256
+          aws s3 cp build/cost-agent.zip s3://${{ env.BUCKET_NAME }}/${{ env.S3_PREFIX }}/cost-agent.zip --sse AES256
+          aws s3 cp build/security-agent.zip s3://${{ env.BUCKET_NAME }}/${{ env.S3_PREFIX }}/security-agent.zip --sse AES256
+
       - name: Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
             --template-file templates/main.yaml \
             --stack-name ${{ env.STACK_NAME }} \
-            --parameter-overrides Environment=sandbox \
+            --parameter-overrides \
+              Environment=sandbox \
+              SenderEmail="khanhamza2293@gmail.com" \
+              RecipientEmails="hamza.khan@nscorp.com" \
+              AccountAlias=sandbox \
+              BedrockModelId="anthropic.claude-3-5-sonnet-v2:0" \
+              DeploymentBucketName=${{ env.BUCKET_NAME }} \
+              SupervisorS3Key=${{ env.S3_PREFIX }}/supervisor.zip \
+              CostAgentS3Key=${{ env.S3_PREFIX }}/cost-agent.zip \
+              SecurityAgentS3Key=${{ env.S3_PREFIX }}/security-agent.zip \
             --no-fail-on-empty-changeset \
             --capabilities CAPABILITY_NAMED_IAM

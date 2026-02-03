@@ -10,15 +10,18 @@ Parameters:
       - dev
       - prod
     Description: Environment name for resource naming.
-  SupervisorImageUri:
+  DeploymentBucketName:
     Type: String
-    Description: Private ECR image URI for the supervisor Lambda (same account/region). Lambda cannot use public ECR; push the base image to your stack ECR repo first.
-  CostAgentImageUri:
+    Description: S3 bucket for Lambda deployment packages (from s3-deployment-bucket stack). Upload zips with --sse AES256.
+  SupervisorS3Key:
     Type: String
-    Description: Private ECR image URI for the cost agent Lambda (same account/region).
-  SecurityAgentImageUri:
+    Description: S3 key for supervisor Lambda zip (e.g. supervisor.zip).
+  CostAgentS3Key:
     Type: String
-    Description: Private ECR image URI for the security agent Lambda (same account/region).
+    Description: S3 key for cost agent Lambda zip (e.g. cost-agent.zip).
+  SecurityAgentS3Key:
+    Type: String
+    Description: S3 key for security agent Lambda zip (e.g. security-agent.zip).
   SenderEmail:
     Type: String
     Description: Verified SES sender email (e.g. noreply@yourdomain.com).
@@ -35,7 +38,7 @@ Parameters:
     Description: Bedrock model ID for Converse API (e.g. anthropic.claude-3-5-sonnet-v2:0).
 
 Resources:
-  # ECR repos are created by templates/ecr-only.yaml. Deploy that stack first, push images, then deploy this stack.
+  # S3 bucket is created by templates/s3-deployment-bucket.yaml. Deploy that stack first, upload zips with --sse AES256, then deploy this stack.
 
   # --- SSM config (supervisor reads these at runtime) ---
   ConfigRecipients:
@@ -164,9 +167,12 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "ai-cloud-agent-${Environment}-cost-agent"
-      PackageType: Image
+      PackageType: Zip
+      Runtime: python3.12
+      Handler: app.handler
       Code:
-        ImageUri: !Ref CostAgentImageUri
+        S3Bucket: !Ref DeploymentBucketName
+        S3Key: !Ref CostAgentS3Key
       Role: !GetAtt CostAgentRole.Arn
       Timeout: 120
       MemorySize: 256
@@ -180,9 +186,12 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "ai-cloud-agent-${Environment}-security-agent"
-      PackageType: Image
+      PackageType: Zip
+      Runtime: python3.12
+      Handler: app.handler
       Code:
-        ImageUri: !Ref SecurityAgentImageUri
+        S3Bucket: !Ref DeploymentBucketName
+        S3Key: !Ref SecurityAgentS3Key
       Role: !GetAtt SecurityAgentRole.Arn
       Timeout: 120
       MemorySize: 256
@@ -197,9 +206,12 @@ Resources:
     DependsOn: [CostAgentPolicy, SecurityAgentPolicy]
     Properties:
       FunctionName: !Sub "ai-cloud-agent-${Environment}-supervisor"
-      PackageType: Image
+      PackageType: Zip
+      Runtime: python3.12
+      Handler: app.handler
       Code:
-        ImageUri: !Ref SupervisorImageUri
+        S3Bucket: !Ref DeploymentBucketName
+        S3Key: !Ref SupervisorS3Key
       Role: !GetAtt SupervisorRole.Arn
       Timeout: 300
       MemorySize: 512
@@ -264,15 +276,9 @@ Outputs:
   SecurityAgentFunctionArn:
     Description: Security agent Lambda ARN.
     Value: !GetAtt SecurityAgentLambda.Arn
-  SupervisorRepoUri:
-    Description: ECR image URI for supervisor (repos created by ecr-only stack).
-    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ai-cloud-agent-${Environment}-supervisor:latest"
-  CostAgentRepoUri:
-    Description: ECR image URI for cost agent.
-    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ai-cloud-agent-${Environment}-cost-agent:latest"
-  SecurityAgentRepoUri:
-    Description: ECR image URI for security agent.
-    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ai-cloud-agent-${Environment}-security-agent:latest"
+  DeploymentBucketName:
+    Description: S3 bucket for Lambda deployment packages.
+    Value: !Ref DeploymentBucketName
   LastDeployedParameter:
     Description: SSM parameter updated on each deploy.
     Value: !Ref PipelineMarker

@@ -1,11 +1,11 @@
 # AI Cloud Agent
 
-Multi-agent system that monitors an AWS account and sends daily/weekly email reports (cloud hygiene, cost, security) via a supervisor and subordinate agents. Deployed with CloudFormation; Lambdas use container images (ECR).
+Multi-agent system that monitors an AWS account and sends daily/weekly email reports (cloud hygiene, cost, security) via a supervisor and subordinate agents. Deployed with CloudFormation; Lambdas use zip packages stored in S3.
 
 ## Repository and pipeline
 
 - **GitHub**: Create a new repo (e.g. `ai-cloud-agent`) and add this project as the remote (see below).
-- **Pipeline**: GitHub Actions deploys the CloudFormation stack on push to `main`. No S3 uploads; Lambdas will use ECR when added.
+- **Pipeline**: GitHub Actions builds zip packages, uploads to S3 with `--sse AES256` (SCP compliance), and deploys the CloudFormation stack on push to `main`.
 
 ### One-time setup
 
@@ -16,19 +16,27 @@ Multi-agent system that monitors an AWS account and sends daily/weekly email rep
    - Create the stack. When it completes, go to **Outputs** and copy the **RoleArn** (e.g. `arn:aws:iam::123456789012:role/ai-cloud-agent-cloudformation-service-role`).
    - When creating the main stack with **Sync from Git**, under **Permissions** → **IAM role**, choose this role (it appears as `ai-cloud-agent-cloudformation-service-role`).
 
-2. **Create the GitHub repo**
+2. **Create the S3 deployment bucket (required before main stack)**  
+   Our org SCP requires explicit server-side encryption on all S3 uploads. Deploy the compliant bucket once:
+   - **CloudFormation console** → Create stack → Upload a template file → choose `templates/s3-deployment-bucket.yaml`.
+   - Stack name: e.g. `ai-cloud-agent-s3`.
+   - Parameters: Environment = `sandbox` (or match your environment).
+   - Create the stack. Note the **BucketName** output (e.g. `ai-cloud-agent-sandbox-deployments-503532613196`).
+
+3. **Create the GitHub repo**
    - On GitHub: New repository → name `ai-cloud-agent` (or your choice) → Create (no need to add README; this project has one).
 
-3. **Connect and push**
+4. **Connect and push**
    ```bash
    git remote add origin https://github.com/YOUR_ORG/ai-cloud-agent.git
    git branch -M main
    git push -u origin main
    ```
 
-4. **Configure AWS credentials for the pipeline**
+5. **Configure AWS credentials for the pipeline**  
+   The pipeline needs permissions to upload to S3 (with explicit encryption) and deploy CloudFormation.
    - **Option A (recommended): OIDC**  
-     In your AWS account, create an OIDC identity provider for GitHub and an IAM role that trusts it and has `cloudformation:*` (and later `ecr:*`, `lambda:*`). In the repo: Settings → Secrets and variables → Actions:
+     In your AWS account, create an OIDC identity provider for GitHub and an IAM role that trusts it. The role needs `s3:PutObject` on the deployment bucket (uploads must use `--sse AES256`), `cloudformation:*`, `lambda:*`, and related IAM/EventBridge permissions. In the repo: Settings → Secrets and variables → Actions:
      - **Variables**: `USE_OIDC` = `true`
      - **Secrets**: `AWS_ROLE_ARN` (the IAM role ARN), `AWS_REGION` (e.g. `us-east-1`)
    - **Option B: Access keys**  
@@ -37,10 +45,10 @@ Multi-agent system that monitors an AWS account and sends daily/weekly email rep
      - `AWS_SECRET_ACCESS_KEY`
      - `AWS_REGION` (e.g. `us-east-1`). If omitted, the workflow uses `us-east-1`.
 
-5. **Update the workflow for your stack name**  
-   Edit `.github/workflows/deploy.yml` and set `stack-name` (and `region` if not using a secret) to match your environment (e.g. `ai-cloud-agent-sandbox`).
+6. **Update the workflow for your stack and bucket**  
+   Edit `.github/workflows/deploy.yml` and set `STACK_NAME`, `BUCKET_NAME`, and any parameter-overrides (e.g. SenderEmail, RecipientEmails) to match your environment.
 
-After that, every push to `main` runs the workflow and deploys/updates the CloudFormation stack.
+After that, every push to `main` builds the Lambda zips, uploads them to S3 with `--sse AES256`, and deploys/updates the CloudFormation stack.
 
 ## Deploying the agent
 
@@ -50,7 +58,6 @@ The main stack (`templates/main.yaml`) creates:
 - **Cost agent Lambda** – Cost Explorer + Bedrock; returns a short cost/optimization report.
 - **Security agent Lambda** – Security Hub / EC2 / S3 checks + Bedrock; returns a short security report.
 - **EventBridge** – daily (08:00 UTC) and weekly (Monday 08:00 UTC) rules that trigger the supervisor with `schedule_type: daily` or `weekly`.
-- **ECR repositories** – one per Lambda; push your container images here.
 - **SSM parameters** – recipients and account alias (used by the supervisor at runtime).
 
 ### Required stack parameters
@@ -63,72 +70,40 @@ When you create or update the stack (Sync from Git or console), set:
 | **RecipientEmails** | Comma-separated emails that receive the reports (e.g. `engineer@company.com,team@company.com`). |
 | **AccountAlias** | Label in the email subject (e.g. `sandbox`, `prod`). Default: `sandbox`. |
 | **BedrockModelId** | Model for Converse API (default: `anthropic.claude-3-5-sonnet-v2:0`). Enable this model in Bedrock in your account/region. |
+| **DeploymentBucketName** | S3 bucket for Lambda zips (from `s3-deployment-bucket` stack). |
+| **SupervisorS3Key** | S3 key for supervisor zip (e.g. `ai-cloud-agent/sandbox/supervisor.zip`). |
+| **CostAgentS3Key** | S3 key for cost agent zip. |
+| **SecurityAgentS3Key** | S3 key for security agent zip. |
 
-**SupervisorImageUri**, **CostAgentImageUri**, **SecurityAgentImageUri** – Required. Lambda **cannot** use images from public ECR; images must be in a **private ECR repository** in your account and region. Push the base image (or your custom image) to the stack’s ECR repos, then set these parameters to those image URIs (see below).
+### S3 and SCP compliance
 
-### Fix: "Source image ... is not valid" / CREATE_FAILED
+Our AWS Organization enforces SCPs that **deny all s3:PutObject calls unless server-side encryption is explicitly used**. Therefore:
 
-Lambda rejects `public.ecr.aws/lambda/python:3.12` because it only accepts images from **private** ECR in the same account/region. Do this:
+- The deployment bucket is created with default SSE-S3 (AES256) encryption and public access blocked.
+- **All uploads must specify `--sse AES256`** (e.g. `aws s3 cp file.zip s3://bucket/key --sse AES256`).
+- The build-and-upload script and GitHub Actions workflow use `--sse AES256` for all uploads.
 
-1. **Create the ECR repos** (if you see *"The repository with name 'ai-cloud-agent-sandbox-...' does not exist"* when pushing):  
-   Deploy the ECR-only template once so the repos exist:
-   - **CloudFormation console** → Create stack → Upload a template file → choose `templates/ecr-only.yaml`.
-   - Stack name: e.g. `ai-cloud-agent-ecr`.
-   - Create the stack. When it completes, the three repos exist and you can push images.
+### Local build and upload
 
-2. **Get your ECR repo URIs**  
-   From the CloudFormation stack **Outputs** (or Resources): `SupervisorRepoUri`, `CostAgentRepoUri`, `SecurityAgentRepoUri`. If the stack is CREATE_FAILED, the ECR repos may still exist – check the ECR console for `ai-cloud-agent-sandbox-supervisor`, `-cost-agent`, `-security-agent`. The image URI format is: `ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest` (replace ACCOUNT and REGION).
+To build zip packages and upload to S3 manually (e.g. before a Git Sync deploy):
 
-3. **Build and push the supervisor image** – the supervisor needs a proper image with a handler (not just the raw base image). From repo root:
+```powershell
+# Deploy the S3 bucket first if not already done.
+# Then run (from repo root):
+.\scripts\build-and-upload.ps1 -Environment sandbox -AccountId 503532613196
 
-   ```powershell
-   .\scripts\build-supervisor.ps1 -AccountId ACCOUNT -Region REGION
-   ```
+# Or with explicit bucket name:
+.\scripts\build-and-upload.ps1 -BucketName ai-cloud-agent-sandbox-deployments-503532613196
+```
 
-   Or manually (replace ACCOUNT and REGION):
+Update `templates/sandbox-deployment.yaml` (or your deployment file) with the S3 keys output by the script, then commit and push for Git Sync.
 
-   ```powershell
-   aws ecr get-login-password --region REGION | docker login --username AWS --password-stdin ACCOUNT.dkr.ecr.REGION.amazonaws.com
-   docker build --platform linux/amd64 -t ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest -f src/supervisor/Dockerfile src/supervisor
-   docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest
-   ```
-
-   **Important:** Do not push the plain base image (`docker tag public.ecr.aws/lambda/python:3.12 ...`) for the supervisor. That causes "entrypoint requires the handler name to be the first argument" because the base image has no handler. Always build from `src/supervisor/Dockerfile`.
-
-   For the cost and security agents (if you only have base images for now):
-   ```powershell
-   docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest
-   docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-cost-agent:latest
-   ```
-   ```powershell
-   docker tag public.ecr.aws/lambda/python:3.12 ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-security-agent:latest
-   docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ai-cloud-agent-sandbox-security-agent:latest
-   ```
-
-   Example for account `503532613196` and region `us-east-1`: use `503532613196` for ACCOUNT and `us-east-1` for REGION in every command above.
-
-4. **Set the image parameters**  
-   In `templates/sandbox-deployment.yaml`, replace `ACCOUNT` and `REGION` in **SupervisorImageUri**, **CostAgentImageUri**, and **SecurityAgentImageUri** with your real account ID and region (e.g. `123456789012`, `us-east-1`).
-
-5. **Commit and push**  
-   Git sync will run again; the stack update will use the new image URIs and Lambda creation should succeed. If the stack was CREATE_FAILED, the update retries the failed resources.
-
-### First deploy (with base images)
+### First deploy
 
 1. Verify the **sender email** in Amazon SES (SES console → Verified identities).
-2. Push the base image to your ECR repos (step 2 above). If the stack doesn’t exist yet, create the ECR repos first by deploying the stack once (it will fail on Lambda; ECR repos will exist), then push images and set the three image URIs in the deployment file, then push again.
-3. Ensure **SupervisorImageUri**, **CostAgentImageUri**, and **SecurityAgentImageUri** in the deployment file use your private ECR URIs (step 3 above), then create the stack (Sync from Git or console).
-
-### Building and pushing your images
-
-After you add Lambda code under `src/supervisor/`, `src/agents/cost/`, and `src/agents/security/` (each with a `Dockerfile`):
-
-1. **Log in to ECR** (replace region and account as needed):
-   ```bash
-   aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
-   ```
-2. **Build and push** each image to the ECR URIs shown in the stack **Outputs** (e.g. `SupervisorRepoUri`, `CostAgentRepoUri`, `SecurityAgentRepoUri`). Tag as `latest` (or the tag you use in the Outputs).
-3. **Update the stack** with the new image URIs: set parameters **SupervisorImageUri**, **CostAgentImageUri**, **SecurityAgentImageUri** to the full ECR image URIs (e.g. `123456789012.dkr.ecr.us-east-1.amazonaws.com/ai-cloud-agent-sandbox-supervisor:latest`). If you use Git sync, update the stack deployment file parameters and commit; otherwise update the stack in the console.
+2. Deploy `templates/s3-deployment-bucket.yaml` once.
+3. Run `scripts/build-and-upload.ps1` to upload Lambda zips (or let the GitHub Actions workflow do it on push).
+4. Ensure **DeploymentBucketName**, **SupervisorS3Key**, **CostAgentS3Key**, and **SecurityAgentS3Key** in the deployment file match your bucket and keys, then create the stack (Sync from Git or console).
 
 ### Testing the supervisor
 
@@ -142,9 +117,10 @@ Check CloudWatch Logs for the supervisor and agents, and ensure the recipient in
 
 ## Project layout
 
-- **`templates/`** – CloudFormation: `main.yaml` (agent stack), `cloudformation-service-role.yaml` (bootstrap IAM role for Git sync).
-- **`src/`** – Lambda source: `supervisor/`, `agents/cost/`, `agents/security/` (each with a Dockerfile; add these when implementing the agents).
-- **`.github/workflows/`** – GitHub Actions (optional deploy; use Git sync for deployment if you prefer).
+- **`templates/`** – CloudFormation: `main.yaml` (agent stack), `s3-deployment-bucket.yaml` (S3 bucket for Lambda zips), `cloudformation-service-role.yaml` (bootstrap IAM role for Git sync).
+- **`src/`** – Lambda source: `supervisor/`, `agents/cost/`, `agents/security/` (each with `app.py` handler).
+- **`scripts/build-and-upload.ps1`** – Builds zip packages and uploads to S3 with `--sse AES256`.
+- **`.github/workflows/`** – GitHub Actions (build, upload, deploy).
 
 ## License
 

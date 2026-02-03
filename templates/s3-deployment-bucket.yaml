@@ -1,0 +1,35 @@
+# Creates the S3 bucket for Lambda deployment packages. Deploy this once before the main stack.
+# Org-compliant: SSE-S3 (AES256) encryption, public access blocked.
+# Upload packages with: aws s3 cp package.zip s3://BUCKET/key --sse AES256
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AI Cloud Agent - S3 deployment bucket for Lambda zip packages (org-compliant).
+
+Parameters:
+  Environment:
+    Type: String
+    Default: sandbox
+    AllowedValues: [sandbox, dev, prod]
+    Description: Environment name; must match main stack.
+
+Resources:
+  DeploymentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "ai-cloud-agent-${Environment}-deployments-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+Outputs:
+  BucketName:
+    Description: S3 bucket for Lambda deployment packages. Upload with --sse AES256.
+    Value: !Ref DeploymentBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketName"
